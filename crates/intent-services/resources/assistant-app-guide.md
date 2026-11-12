@@ -1446,6 +1446,8 @@ button, its visible label is **Attach more context**; **New note** is the toolti
 Notes hold shared context, decisions, and deliverables for that workspace.
 A blue dot on a note's icon marks unread changes, like the dot on agent avatars.
 Open the note to clear it; task progress rings still show task status.
+Comments attach to workspace notes. File paths do not support comments; create a
+note and link the file when you need a place to discuss it.
 Notes with child notes, including the Spec, show a chevron and start collapsed,
 with a child count. Select the chevron to show or hide the children
 without opening the note; that choice is saved for the workspace. Searching shows

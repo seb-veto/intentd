@@ -674,7 +674,7 @@ pub const COLLABORATOR_METHODS: &[(&str, &str)] = &[
     ("chat.unsubscribe", "Client boot: drops a chat channel subscription."),
     ("client.hello", "Client boot: binds logical device metadata. The principal comes only from admission; roster visibility and browser hosting authority are independent."),
     ("client.list", "Read: authenticated devices. Owner/member see the host roster; guests see only their own principal's devices."),
-    ("comment.add", "Edit: anchors a comment on a note; actor recorded. Note-scoped."),
+    ("comment.add", "Edit: anchors a comment on a workspace note; actor recorded. File paths are not comment targets."),
     ("comment.delete", "Edit: deletes one comment. Note-scoped."),
     ("comment.getThread", "Read: one comment thread. Note-scoped."),
     ("comment.list", "Read: comment threads of a note. Note-scoped."),

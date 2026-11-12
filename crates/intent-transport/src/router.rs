@@ -2582,7 +2582,12 @@ async fn dispatch(
                     comment_id,
                 )
                 .await
-                .map_err(domain_to_rpc)?;
+                .map_err(|error| match error {
+                    Error::NotFound(_) => not_found(
+                        "Note not found. Comments can only be added to workspace notes, not files. Create a note to discuss this file.",
+                    ),
+                    other => domain_to_rpc(other),
+                })?;
             to_result_value(&result)
         }
         // Boxed off `dispatch`'s debug poll frame (see `crate::stack_frame`).
