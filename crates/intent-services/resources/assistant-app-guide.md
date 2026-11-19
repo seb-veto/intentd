@@ -1610,6 +1610,11 @@ In test builds, page-load failures also show the same message and **Retry** dire
 in the preview. Test-build behavior pending its frontend release.
 If the page closed itself, its empty page shows the message and **Retry** directly.
 
+Pending the desktop release that includes this control: choose **View → Darken
+Websites** to request dark website themes and darken light pages in workspace
+browser tabs hosted by this desktop app. The choice is saved on this device.
+Clear the same checkbox to restore the default website appearance.
+
 ## iOS workspace browser
 
 <!-- Sources: packages/ios/Intent/Views/Workspaces/{WorkspaceBrowserView,WorkspaceBrowserPage}.swift; packages/ios/Intent/Services/BrowserTunnelURL.swift; packages/ios/Intent/Info.plist. -->
