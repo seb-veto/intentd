@@ -138,6 +138,7 @@ fn issue(identifier: &str) -> LinearIssueResult {
         identifier: identifier.to_string(),
         title: format!("Issue {identifier}"),
         description: None,
+        attachment_urls: None,
         url: None,
         team_name: None,
         team_key: None,

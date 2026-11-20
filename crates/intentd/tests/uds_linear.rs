@@ -35,6 +35,7 @@ fn issue(identifier: &str) -> LinearIssueResult {
         identifier: identifier.to_string(),
         title: "Issue".to_string(),
         description: None,
+        attachment_urls: None,
         url: None,
         team_name: None,
         team_key: None,

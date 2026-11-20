@@ -49,6 +49,9 @@ pub struct LinearIssueResult {
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Bounded external attachment URLs for issue detail.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_urls: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -232,6 +235,7 @@ mod tests {
             identifier: "ENG-42".into(),
             title: "Fix the thing".into(),
             description: None,
+            attachment_urls: None,
             url: Some("https://linear.app/x/issue/ENG-42".into()),
             team_name: Some("Engineering".into()),
             team_key: Some("ENG".into()),
@@ -250,6 +254,7 @@ mod tests {
         assert_eq!(v["teamName"], "Engineering");
         assert_eq!(v["createdAt"], "2026-01-01T00:00:00.000Z");
         assert!(v.get("description").is_none());
+        assert!(v.get("attachmentUrls").is_none());
         assert!(v.get("project").is_none());
         assert!(v.get("updatedAt").is_none());
     }

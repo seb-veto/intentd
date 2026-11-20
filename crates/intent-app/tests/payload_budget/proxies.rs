@@ -392,6 +392,7 @@ fn linear_issue(i: usize) -> intent_linear::LinearIssueResult {
         identifier: format!("ENG-{i}"),
         title: text(i, 250),
         description: Some(text(i, LONG_TEXT)),
+        attachment_urls: None,
         url: Some(format!("https://linear.app/intent/issue/ENG-{i}")),
         team_name: Some("Engineering".into()),
         team_key: Some("ENG".into()),

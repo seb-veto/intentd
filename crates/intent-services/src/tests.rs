@@ -34315,6 +34315,7 @@ mod linear {
                 identifier: "ENG-1".into(),
                 title: "t".into(),
                 description: None,
+                attachment_urls: None,
                 url: None,
                 team_name: None,
                 team_key: None,

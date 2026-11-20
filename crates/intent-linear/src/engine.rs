@@ -156,7 +156,7 @@ impl LinearEngine for LinearEngineImpl {
             let query = format!(
                 "query IssueByKey($key: String!, $number: Float!) {{ \
                     issues(first: 1, filter: {{ team: {{ key: {{ eq: $key }} }}, number: {{ eq: $number }} }}) \
-                    {{ nodes {{ {ISSUE_FIELDS} }} }} \
+                    {{ nodes {{ {ISSUE_FIELDS} attachments(first: 20) {{ nodes {{ url }} }} }} }} \
                 }}"
             );
             let variables = json!({ "key": key, "number": number });
@@ -167,7 +167,7 @@ impl LinearEngine for LinearEngineImpl {
             Ok(map_issue(node))
         } else {
             let query =
-                format!("query Issue($id: String!) {{ issue(id: $id) {{ {ISSUE_FIELDS} }} }}");
+                format!("query Issue($id: String!) {{ issue(id: $id) {{ {ISSUE_FIELDS} attachments(first: 20) {{ nodes {{ url }} }} }} }}");
             let variables = json!({ "id": id_or_identifier });
             let data = self.client.graphql(&query, variables).await?;
             let node = data
@@ -396,6 +396,15 @@ pub(crate) fn map_issue(node: &Value) -> LinearIssueResult {
         identifier: str_field(node, "identifier").unwrap_or_default(),
         title: str_field(node, "title").unwrap_or_default(),
         description: str_field(node, "description"),
+        attachment_urls: node
+            .pointer("/attachments/nodes")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| str_field(item, "url"))
+                    .collect()
+            }),
         url: str_field(node, "url"),
         team_name: node.get("team").and_then(|t| str_field(t, "name")),
         team_key: node.get("team").and_then(|t| str_field(t, "key")),
@@ -559,7 +568,11 @@ mod tests {
             "assignee": { "name": "Ada" },
             "creator": { "name": "Grace" },
             "project": { "name": "Apollo" },
-            "labels": { "nodes": [ { "name": "bug" }, { "name": "p1" } ] }
+            "labels": { "nodes": [ { "name": "bug" }, { "name": "p1" } ] },
+            "attachments": { "nodes": [
+                { "url": "https://sentry.io/organizations/example/issues/123/events/abcdef/" },
+                { "url": null }
+            ] }
         });
         let r = map_issue(&node);
         assert_eq!(r.identifier, "ENG-7");
@@ -571,6 +584,12 @@ mod tests {
         assert_eq!(r.creator.as_deref(), Some("Grace"));
         assert_eq!(r.project.as_deref(), Some("Apollo"));
         assert_eq!(r.labels, Some(vec!["bug".to_string(), "p1".to_string()]));
+        assert_eq!(
+            r.attachment_urls,
+            Some(vec![
+                "https://sentry.io/organizations/example/issues/123/events/abcdef/".to_string()
+            ])
+        );
     }
 
     #[test]
