@@ -272,6 +272,14 @@ Use the same data directory/environment for all lifecycle commands. There is no
 `--data-dir` startup flag; set `INTENTD_DATA_DIR` instead. Run `intentd help serve`
 for the installed daemon's detailed options.
 
+
+Set `INTENT_ERROR_REPORTING_DSN` to a project's public HTTPS Sentry Client Key
+to enable error reporting on this daemon. Reports include first-party Rust
+error locations, terminal agent failure locations, and the build version.
+Error text, tracing fields, span contents, and agent details stay in the local
+logs. Configure the variable separately on each daemon. The variable is
+independent of the token Intent uses to read Sentry issues.
+
 `restart` takes no launch options. For a running supervised daemon it keeps the
 supervisor and its original launch options, gracefully stops the child, and respawns
 on the installed version/current channel pin. This works for manually launched
