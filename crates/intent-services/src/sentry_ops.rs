@@ -1,16 +1,8 @@
 //! Wire-policy glue for the read-only `sentry.*` methods (PROTOCOL §5.29).
 //!
-//! The engine + REST transport live in `intent-sentry`; this module owns only
-//! the parity-critical wire glue so it stays unit-testable without a network:
-//! resolving the active [`SentryEngine`] (injected handle else the
-//! registry-built engine from default settings, i.e. `SENTRY_ORG` /
-//! `SENTRY_API_TOKEN` / keychain), validating the `status` enum, and mapping
-//! engine errors onto the domain `Internal` error (→ `-32603`). It mirrors
-//! `linear_ops::resolve_engine`.
-//!
-//! GUARDRAIL: the Sentry auth token is a secret. It never appears here — the
-//! engine reads it internally and only derived identity (the org slug)
-//! crosses the wire.
+//! The engine and REST transport live in `intent-sentry`. This module
+//! resolves server-side credentials and maps engine errors onto the wire.
+//! Only derived identity crosses the wire.
 
 use std::sync::Arc;
 
@@ -25,20 +17,44 @@ pub(crate) fn map_sentry_err(e: &intent_sentry::Error) -> Error {
     Error::Internal(e.to_string())
 }
 
-/// Resolve the active [`SentryEngine`]: the injected handle (tests / explicit
-/// wiring) else the registry-built engine from default settings (org/token
-/// from `SENTRY_ORG` / `SENTRY_API_TOKEN` / keychain, §5.29). A missing pair
-/// yields `Internal` (graceful "not configured"), never a panic. Async
-/// because the keychain lookup runs on the blocking pool with a bounded
-/// timeout so a wedged OS keychain never blocks the async runtime.
-pub(crate) async fn resolve_engine(
-    injected: Option<Arc<dyn SentryEngine>>,
-) -> Result<Arc<dyn SentryEngine>> {
-    match injected {
-        Some(engine) => Ok(engine),
-        None => SentryRegistry::from_settings(&SentrySettings::default())
+pub(crate) const SENTRY_TOKEN_SETTING: &str = "accounts.sentry.token";
+pub(crate) const SENTRY_ORGANIZATION_SETTING: &str = "accounts.sentry.organization";
+
+impl crate::Services {
+    pub(super) async fn resolve_sentry_engine(&self) -> Result<Arc<dyn SentryEngine>> {
+        if let Some(engine) = &self.sentry_engine {
+            return Ok(Arc::clone(engine));
+        }
+
+        SentryRegistry::from_settings(&self.sentry_settings().await?)
             .await
-            .map_err(|e: intent_sentry::Error| map_sentry_err(&e)),
+            .map_err(|e| map_sentry_err(&e))
+    }
+
+    async fn sentry_settings(&self) -> Result<SentrySettings> {
+        // Match settings.get lock ordering. Read both halves of the saved
+        // account without racing a settings.update batch or its rollback.
+        let _secret_guard = self
+            .settings_secret_gates
+            .read(Some(SENTRY_TOKEN_SETTING))
+            .await;
+        let _revision_guard = self.settings_revision_gate.read().await;
+        let setting = self
+            .settings_service()
+            .completion_value(SENTRY_ORGANIZATION_SETTING)
+            .await?;
+        let Some(organization) = setting["value"]
+            .as_str()
+            .filter(|org| !org.trim().is_empty())
+        else {
+            return Ok(SentrySettings::default());
+        };
+
+        Ok(SentrySettings {
+            organization: Some(organization.to_owned()),
+            token: self.secrets.load(SENTRY_TOKEN_SETTING).await?,
+            ..SentrySettings::default()
+        })
     }
 }
 
@@ -68,6 +84,39 @@ pub(crate) fn wire_limit(limit: Option<i64>) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[intent_test_macros::daemon_test]
+    async fn engine_uses_credentials_saved_by_settings() {
+        use intent_core::WorkspaceApi;
+        use serde_json::json;
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = intent_store::Store::open(&temp.path().join("intentd.db"))
+            .await
+            .unwrap();
+        let registry = crate::SettingsRegistry::load(temp.path().join("config.toml")).unwrap();
+        let services = crate::Services::new_isolated(store)
+            .with_settings_registry(Arc::new(registry))
+            .with_secret_store(Arc::new(crate::settings::InMemorySecretStore::default()));
+
+        services
+            .settings_update(json!([
+                {"path": SENTRY_TOKEN_SETTING, "value": "fixture-token"},
+                {"path": SENTRY_ORGANIZATION_SETTING, "value": "acme"}
+            ]))
+            .await
+            .unwrap();
+        let settings = services.sentry_settings().await.unwrap();
+        assert_eq!(settings.organization.as_deref(), Some("acme"));
+        assert_eq!(settings.token.as_deref(), Some("fixture-token"));
+        assert!(services.resolve_sentry_engine().await.is_ok());
+
+        services
+            .settings_reset(SENTRY_TOKEN_SETTING.to_owned())
+            .await
+            .unwrap();
+        assert!(services.sentry_settings().await.unwrap().token.is_none());
+    }
 
     #[test]
     fn parses_status_with_default() {

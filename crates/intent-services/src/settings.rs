@@ -2242,13 +2242,13 @@ pub(crate) fn definitions() -> Vec<SettingDefinition> {
         ),
         // --- Group A: Sentry account -----------------------------------------
         secret(
-            "accounts.sentry.token",
+            crate::sentry_ops::SENTRY_TOKEN_SETTING,
             "Sentry API token",
             "API token used by the Sentry integration",
             "accounts",
         ),
         string(
-            "accounts.sentry.organization",
+            crate::sentry_ops::SENTRY_ORGANIZATION_SETTING,
             "Sentry organization",
             "Sentry organization slug (non-secret companion of accounts.sentry.token)",
             "accounts",
