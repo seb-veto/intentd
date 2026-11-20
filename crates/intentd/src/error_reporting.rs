@@ -37,6 +37,7 @@ impl Reporter {
         Some(Self(Arc::new(sentry::Client::from(
             sentry::ClientOptions {
                 dsn: Some(dsn),
+                transport: Some(Arc::new(sentry::transports::DefaultTransportFactory)),
                 shutdown_timeout: Duration::from_secs(2),
                 default_integrations: false,
                 send_default_pii: false,
