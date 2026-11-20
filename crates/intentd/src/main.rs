@@ -39,6 +39,7 @@ mod cmdline_redact;
 mod command_evidence;
 mod db_repair;
 mod doctor_codex;
+mod error_reporting;
 mod exact_update;
 #[cfg(unix)]
 mod executor;
@@ -412,12 +413,16 @@ fn main() -> ExitCode {
         std::env::set_var("INTENTD_SPECIALISTS_DIR", dir);
     }
     let serving = matches!(cli.command, Command::Serve { .. });
+    let reporting = error_reporting::Reporter::from_env(serving);
     let runtime = build_runtime();
-    let result = runtime.block_on(async_main(cli));
+    let result = runtime.block_on(async_main(cli, reporting.clone()));
     if serving {
         shutdown::drop_runtime(runtime);
     } else {
         drop(runtime);
+    }
+    if let Some(reporting) = reporting {
+        reporting.flush();
     }
     result
 }
@@ -442,9 +447,9 @@ fn build_runtime() -> tokio::runtime::Runtime {
         .expect("build tokio runtime")
 }
 
-async fn async_main(cli: Cli) -> ExitCode {
+async fn async_main(cli: Cli, reporting: Option<error_reporting::Reporter>) -> ExitCode {
     let command = cli.command;
-    init_tracing(matches!(command, Command::Serve { .. }));
+    init_tracing(matches!(command, Command::Serve { .. }), reporting);
     install_panic_hook();
     // Rust starts with SIGPIPE ignored, so `println!` to a pipe whose reader
     // closed early (`intentd status | head`) gets EPIPE and panics — and the
@@ -498,6 +503,7 @@ async fn async_main(cli: Cli) -> ExitCode {
                     }
                     Err(e) => {
                         serve.failed();
+                        tracing::error!("Intent daemon could not serve");
                         eprintln!("error: {e}");
                         ExitCode::FAILURE
                     }
@@ -1803,7 +1809,7 @@ fn to_exit(result: anyhow::Result<()>) -> ExitCode {
     }
 }
 
-fn init_tracing(serving: bool) {
+fn init_tracing(serving: bool, reporting: Option<error_reporting::Reporter>) {
     use std::io::IsTerminal;
     use tracing_subscriber::{
         fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
@@ -1886,6 +1892,11 @@ fn init_tracing(serving: bool) {
 
     let subscriber = tracing_subscriber::registry()
         .with(profile_layer)
+        .with(reporting.map(|layer| {
+            layer.with_filter(tracing_subscriber::filter::filter_fn(
+                error_reporting::should_report,
+            ))
+        }))
         .with(stderr_layer);
 
     if let Some(appender) = file_appender {

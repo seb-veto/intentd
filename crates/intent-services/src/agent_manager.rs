@@ -18064,6 +18064,7 @@ pub(crate) async fn persist_terminal_error_status_via_services(
     // monorepo#840: record the identical-failure streak BEFORE persisting so
     // `session_poisoned` sees a consistent (status, streak) pair as soon as
     // the Error status lands.
+    tracing::error!(target: "intent_services::agent_terminal_failure", "Agent turn failed");
     let streak = services.record_terminal_failure(agent_id, error_text);
     // monorepo#940: the same classification that quarantines the session
     // (`session_poisoned`) is surfaced on the wire as `sessionCorrupted` so
