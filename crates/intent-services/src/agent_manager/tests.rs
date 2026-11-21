@@ -27591,6 +27591,108 @@ mod flush_queued_messages_tests {
     }
 
     #[tokio::test]
+    async fn drain_flushes_twenty_image_messages_under_the_provider_budget() {
+        let script = mock_agent_script();
+        let scratch = test_tempdir("itd-flush-images-");
+        let prompt_log = scratch.path().join("prompts.log");
+        let _env = EnvGuard::set_all(&[
+            ("MOCK_AGENT_SCRIPT_PATH", script.as_str()),
+            ("MOCK_AGENT_PROMPT_LOG", prompt_log.to_str().unwrap()),
+        ]);
+        let (_tmp, mgr) = manager().await;
+        let mgr = Arc::new(mgr);
+        let (ws, id) = (
+            WorkspaceId::from("ws-flush-images"),
+            AgentId::from("a-flush-images"),
+        );
+        seed_mock_agent(&mgr, &ws, &id).await;
+        let mut workspace = mgr.services.store.get_workspace(&ws).await.unwrap();
+        workspace.worktree_path = Some(scratch.path().display().to_string());
+        mgr.services
+            .store
+            .update_workspace(&workspace)
+            .await
+            .unwrap();
+
+        let mut state = 0x1234_5678_u32;
+        let pixels = image::RgbImage::from_fn(500, 500, |_, _| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let [r, g, b, _] = state.to_le_bytes();
+            image::Rgb([r, g, b])
+        });
+        let mut png = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let bytes = png.into_inner();
+        assert!(20 * base64::encoded_len(bytes.len(), true).unwrap() > 8 * 1024 * 1024);
+        let placed = mgr
+            .services
+            .place_attachment_registered(
+                ws.clone(),
+                "screenshot.png",
+                &crate::file_ops::AttachmentSource::Bytes(&bytes),
+                Some("image/png".into()),
+                None,
+            )
+            .await
+            .unwrap();
+        let attachment_id = placed["attachmentId"].as_str().unwrap();
+        for index in 1..=20 {
+            mgr.services.enqueue_message(
+                &id,
+                format!("Queued screenshot {index}."),
+                Some(json!([{ "type": "image", "attachmentId": attachment_id }])),
+                None,
+                None,
+                None,
+                false,
+                MessageOrigin::User,
+            );
+        }
+
+        mgr.clone().try_drain_queue(id.clone(), ws.clone()).await;
+        timeout(
+            intentd_test_support::test_timeout(Duration::from_secs(30)),
+            async {
+                while mgr.is_busy(&id)
+                    || !mgr.workers.lock().unwrap().is_empty()
+                    || mgr.services.has_ready_to_send(&id)
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            },
+        )
+        .await
+        .expect("image batch completes");
+
+        let log = std::fs::read_to_string(prompt_log).expect("batch reached the mock provider");
+        let turn: Value = serde_json::from_str(&log).expect("one provider turn");
+        let blocks = turn["blocks"].as_array().unwrap();
+        let images: Vec<_> = blocks.iter().filter(|b| b["type"] == "image").collect();
+        let delivered: usize = images
+            .iter()
+            .map(|b| b["data"].as_str().unwrap().len())
+            .sum();
+        assert_eq!(images.len(), 20);
+        assert!(delivered <= 8 * 1024 * 1024);
+        assert!(turn["text"]
+            .as_str()
+            .unwrap()
+            .contains("20 queued messages"));
+        let stored = mgr
+            .services
+            .store
+            .get_attachment(attachment_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(scratch.path().join(stored.stored_path)).unwrap(),
+            bytes
+        );
+    }
+
+    #[tokio::test]
     async fn legacy_setting_off_still_batches_messages() {
         let script = mock_agent_script();
         let scratch = test_tempdir("itd-flush-off-");

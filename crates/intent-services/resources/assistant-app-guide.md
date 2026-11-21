@@ -20,7 +20,7 @@ that it exists or present it as ready for general use. Ordinary setup or permiss
 requirements do not, by themselves, make a supported feature experimental.
 
 Multiplayer is always on: there is no switch to enable or disable it, and opening an
-invitation link joins directly without an enable step. Desktop v2.334.5 and later
+invitation link joins directly without an enable step. Current desktop builds
 show invitation prompts in the current app window; What’s New waits until those
 dialogs close. These fixes first shipped on alpha. On older desktop versions, check
 Home if a prompt does not appear while viewing another machine. Workspace sharing, guest roles,
@@ -31,7 +31,7 @@ Sharing needs the host owner's GitHub or GitLab account connected in **Settings 
 Connections**: without one, new invitation links cannot be created and unused links
 cannot be redeemed until it is reconnected. People who already joined keep access.
 
-Starting with desktop v2.343.2 (first released on alpha), invitation prompts and
+On current desktop builds, invitation prompts and
 joined workspaces use a normal app window, outside the notch. Intent opens or
 restores one when needed. Development launches of these versions do not claim
 `intent://` links. If an older development instance claimed links, reopen installed
@@ -148,7 +148,7 @@ readiness date or advise enabling the experiment for ordinary mobile setup.
 
 ## Inline visuals
 
-Intent desktop v2.253.0 and later can show interactive visuals directly in chat.
+Intent desktop can show interactive visuals directly in chat.
 Ask an agent to visualize an explanation, comparison or changing inputs, such as
 “visualize how seasons work.” The agent uses a self-contained `ws-block:html`
 fence and checks it with the browser `previewHtml` action before showing it.
@@ -1148,10 +1148,11 @@ PNG, JPEG, GIF, and WebP attachments may be resized or re-encoded for provider
 delivery; original attachments and their displayed previews are unchanged. SVG and
 other image formats are sent as files the agent can retrieve and read, rather than
 as vision input. To have the agent inspect their appearance, export a PNG or JPEG.
-If a supported image cannot be read
-or the images together exceed the delivery budget, the turn fails rather than
-silently omitting an image. Re-export an unreadable image as PNG/JPEG, or send fewer
-images cropped to the relevant detail. A provider request-size error can also come
+When the images together exceed the delivery budget, Intent automatically
+compresses or downsizes larger images to fit, including when queued messages
+are delivered together. If an image cannot be read or reduced enough, the turn
+fails so no image is silently omitted. Re-export an unreadable image as PNG/JPEG,
+or send fewer images cropped to the relevant detail. A provider request-size error can also come
 from images retained in earlier turns: start a new agent conversation with only
 the images needed if sending fewer images still fails.
 
@@ -1305,7 +1306,7 @@ changing the filter, repository or tab also clears it.
 
 Right-click a repository or local folder in the Home sidebar and choose **New
 workspace** to start one there. For a GitHub repository, **Hide** removes it from the
-sidebar. For a local folder, **Delete** (app v2.338.0 and later) removes it from Intent's
+sidebar. For a local folder, **Delete** removes it from Intent's
 folder list (files on disk stay) and moves it to **Hidden** if it still has
 workspaces; earlier versions and collaborators see **Hide** instead. A hidden
 repository's workspaces still show under **All repos**. Hidden repositories move to a
@@ -1347,7 +1348,7 @@ grouping choices keep their behavior.
 
 <!-- Sources (paths relative to packages/cloudlands-fe): src/features/home/{HomePage,HomeWorkspaceList,HomeWorkspaceBoard}.svelte; src/features/home/{home-workspace-menu,home-workspaces-persistence,home-workspaces-saga,home-set-aside-shortcut}.ts. -->
 
-**Set aside** is available in alpha builds starting with v2.262.0. Use **Set aside**
+**Set aside** is available in alpha builds. Use **Set aside**
 on a Home workspace row, card or menu. List view moves it into a collapsed
 **Set aside** section; board view shows it in the **Set aside** column on the right.
 The column stays hidden when empty and appears while dragging a card so you can
