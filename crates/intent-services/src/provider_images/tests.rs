@@ -211,7 +211,7 @@ async fn compressible_images_obey_the_dimension_cap_without_changing_in_budget_i
 }
 
 #[tokio::test]
-async fn aggregate_budget_accepts_fitting_images_and_rejects_the_first_excess() {
+async fn aggregate_budget_preserves_fitting_images_and_compresses_an_overflow() {
     let image = png_block(&noise(800, 800, false));
     let ContentBlock::Image(source) = &image else {
         unreachable!()
@@ -225,14 +225,39 @@ async fn aggregate_budget_accepts_fitting_images_and_rejects_the_first_excess() 
         prepare_prompt_images(accepted.clone()).await.unwrap(),
         accepted
     );
-    let mut rejected = accepted;
-    rejected.insert(0, ContentBlock::from("does not count as an image"));
-    rejected.push(image);
-    assert_invalid(
-        prepare_prompt_images(rejected).await.unwrap_err(),
-        4,
-        "8 MiB",
+    let small = png_block(&noise(10, 10, false));
+    let text = ContentBlock::from("does not count as an image");
+    let mut prompt = accepted;
+    prompt.insert(1, small.clone());
+    prompt.insert(3, text.clone());
+    prompt.push(png_block(&noise(800, 800, true)));
+    let prepared = prepare_prompt_images(prompt.clone()).await.unwrap();
+    assert_eq!(prepared.len(), prompt.len());
+    assert_eq!(prepared[1], small);
+    assert_eq!(prepared[3], text);
+    let mut total = 0;
+    for (before, after) in prompt.iter().zip(&prepared) {
+        let (ContentBlock::Image(before), ContentBlock::Image(after_image)) = (before, after)
+        else {
+            continue;
+        };
+        total += after_image.data.len();
+        assert_eq!(before.uri, after_image.uri);
+        assert_eq!(before.annotations, after_image.annotations);
+        assert_eq!(before.meta, after_image.meta);
+        let decoded = decoded_output(after);
+        if before.data.len() > 1024 {
+            assert!(after_image.data.len() < before.data.len());
+        }
+        if after_image.mime_type == "image/jpeg" {
+            assert_eq!(decoded.dimensions(), (800, 800));
+        }
+    }
+    assert_eq!(
+        decoded_output(prepared.last().unwrap()).get_pixel(0, 0).0[3],
+        128
     );
+    assert!(total <= 8 * 1024 * 1024);
 }
 
 #[tokio::test]

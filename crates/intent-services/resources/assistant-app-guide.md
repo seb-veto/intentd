@@ -1148,10 +1148,11 @@ PNG, JPEG, GIF, and WebP attachments may be resized or re-encoded for provider
 delivery; original attachments and their displayed previews are unchanged. SVG and
 other image formats are sent as files the agent can retrieve and read, rather than
 as vision input. To have the agent inspect their appearance, export a PNG or JPEG.
-If a supported image cannot be read
-or the images together exceed the delivery budget, the turn fails rather than
-silently omitting an image. Re-export an unreadable image as PNG/JPEG, or send fewer
-images cropped to the relevant detail. A provider request-size error can also come
+When the images together exceed the delivery budget, Intent automatically
+compresses or downsizes larger images to fit, including when queued messages
+are delivered together. If an image cannot be read or reduced enough, the turn
+fails so no image is silently omitted. Re-export an unreadable image as PNG/JPEG,
+or send fewer images cropped to the relevant detail. A provider request-size error can also come
 from images retained in earlier turns: start a new agent conversation with only
 the images needed if sending fewer images still fails.
 

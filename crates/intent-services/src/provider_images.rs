@@ -89,25 +89,49 @@ pub(crate) async fn prepare_prompt_images(prompt: Vec<ContentBlock>) -> Result<V
 }
 
 fn prepare_images(mut prompt: Vec<ContentBlock>) -> Result<Vec<ContentBlock>> {
-    let mut image_index = 0;
-    let mut base64_bytes = 0;
-    for block in &mut prompt {
-        let ContentBlock::Image(image) = block else {
-            continue;
-        };
-        image_index += 1;
-        if let Some((data, mime_type)) = prepare_image(&image.data, &image.mime_type, image_index)?
+    let mut images: Vec<_> = prompt
+        .iter_mut()
+        .filter_map(|block| match block {
+            ContentBlock::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect();
+    for (index, image) in images.iter_mut().enumerate() {
+        if let Some((data, mime)) =
+            prepare_image(&image.data, &image.mime_type, index + 1, MAX_IMAGE_BYTES)?
         {
             image.data = data;
-            image.mime_type = mime_type.into();
+            image.mime_type = mime.into();
         }
-        // Each individual result is <= 4 MiB, and the running total is <= 8 MiB.
-        base64_bytes += image.data.len();
-        if base64_bytes > MAX_PROMPT_BASE64 {
-            return Err(invalid_image(
-                image_index,
-                "the prepared images together exceed the 8 MiB base64 prompt budget",
-            ));
+    }
+
+    let mut sizes: Vec<_> = images.iter().map(|image| image.data.len()).collect();
+    if sizes.iter().sum::<usize>() <= MAX_PROMPT_BASE64 {
+        return Ok(prompt);
+    }
+
+    // Leave smaller images alone and share their unused budget across the larger ones.
+    sizes.sort_unstable();
+    let mut remaining = MAX_PROMPT_BASE64;
+    let mut share = 0;
+    for (index, size) in sizes.iter().enumerate() {
+        share = remaining / (sizes.len() - index);
+        if *size > share {
+            break;
+        }
+        remaining -= size;
+    }
+    // Base64 pads each group of up to three raw bytes to four bytes.
+    let max_bytes = share / 4 * 3;
+    for (index, image) in images.into_iter().enumerate() {
+        if image.data.len() <= share {
+            continue;
+        }
+        if let Some((data, mime)) =
+            prepare_image(&image.data, &image.mime_type, index + 1, max_bytes)?
+        {
+            image.data = data;
+            image.mime_type = mime.into();
         }
     }
     Ok(prompt)
@@ -117,6 +141,7 @@ fn prepare_image(
     data: &str,
     mime_type: &str,
     index: usize,
+    max_bytes: usize,
 ) -> Result<Option<(String, &'static str)>> {
     if data.len() > MAX_INPUT_BASE64 {
         return Err(invalid_image(
@@ -181,7 +206,8 @@ fn prepare_image(
     decoder
         .set_limits(limits)
         .map_err(|error| decode_error(index, &error))?;
-    let oversized = bytes.len() > MAX_IMAGE_BYTES || width > MAX_EDGE || height > MAX_EDGE;
+    let oversized_dimensions = width > MAX_EDGE || height > MAX_EDGE;
+    let oversized = bytes.len() > max_bytes || oversized_dimensions;
     let orientation = if oversized {
         Some(
             decoder
@@ -192,7 +218,7 @@ fn prepare_image(
         None
     };
     // Always decode: a small file with valid headers can still contain corrupt pixels.
-    let source_image =
+    let mut source_image =
         DynamicImage::from_decoder(decoder).map_err(|error| decode_error(index, &error))?;
     if !oversized {
         return Ok(None);
@@ -200,12 +226,13 @@ fn prepare_image(
     drop(bytes);
     // Decide before resizing: averaging may round a near-opaque alpha to fully opaque.
     let transparent = has_transparency(&source_image);
-    let mut resized = source_image.thumbnail(MAX_EDGE, MAX_EDGE);
-    drop(source_image);
-    if let Some(orientation) = orientation {
-        resized.apply_orientation(orientation);
+    if oversized_dimensions {
+        source_image = source_image.thumbnail(MAX_EDGE, MAX_EDGE);
     }
-    let (data, mime_type) = encode_with_budget(resized, transparent, index)?;
+    if let Some(orientation) = orientation {
+        source_image.apply_orientation(orientation);
+    }
+    let (data, mime_type) = encode_with_budget(source_image, transparent, index, max_bytes)?;
     Ok(Some((general_purpose::STANDARD.encode(data), mime_type)))
 }
 
@@ -222,6 +249,7 @@ fn encode_with_budget(
     mut image: DynamicImage,
     transparent: bool,
     index: usize,
+    max_bytes: usize,
 ) -> Result<(Vec<u8>, &'static str)> {
     for _ in 0..RESIZE_ATTEMPTS {
         let mut png = Cursor::new(Vec::new());
@@ -229,7 +257,7 @@ fn encode_with_budget(
             .write_to(&mut png, ImageFormat::Png)
             .map_err(|_| invalid_image(index, "the image could not be encoded as PNG"))?;
         let png = png.into_inner();
-        if png.len() <= MAX_IMAGE_BYTES {
+        if png.len() <= max_bytes {
             return Ok((png, "image/png"));
         }
         drop(png);
@@ -241,7 +269,7 @@ fn encode_with_budget(
                 image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
                     .encode_image(&rgb)
                     .map_err(|_| invalid_image(index, "the image could not be encoded as JPEG"))?;
-                if jpeg.len() <= MAX_IMAGE_BYTES {
+                if jpeg.len() <= max_bytes {
                     return Ok((jpeg, "image/jpeg"));
                 }
             }
@@ -254,7 +282,7 @@ fn encode_with_budget(
     }
     Err(invalid_image(
         index,
-        "the image could not be reduced below 3 MiB without discarding transparency",
+        "the image could not be reduced to fit the prompt image budget",
     ))
 }
 
