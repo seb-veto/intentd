@@ -294,6 +294,7 @@ where
             // known.
             if frame.len() > crate::MAX_OUTBOUND_MESSAGE_BYTES {
                 tracing::error!(
+                    name: "oversized_outbound_uds_frame",
                     frame_bytes = frame.len(),
                     limit = crate::MAX_OUTBOUND_MESSAGE_BYTES,
                     "dropping oversized outbound UDS frame"

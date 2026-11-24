@@ -67,6 +67,14 @@ impl<S: Subscriber> Layer<S> for Reporter {
 fn report(metadata: &Metadata<'_>) -> Event<'static> {
     let module = metadata.target();
     let agent_failure = module == "intent_services::agent_terminal_failure";
+    // Only an explicit, static diagnostic can populate the exception value.
+    // Tracing messages and fields may contain local paths or user content.
+    let value = match (module, metadata.name()) {
+        ("intent_transport::listener", "oversized_outbound_uds_frame") => {
+            Some("Outbound Unix socket frame exceeded the size limit and was dropped".into())
+        }
+        _ => None,
+    };
     // Keep relative Rust source locations within the checkout. Absolute
     // compiler paths can reveal the build machine's username and directories.
     let source = metadata.file().and_then(|path| {
@@ -103,6 +111,7 @@ fn report(metadata: &Metadata<'_>) -> Event<'static> {
                 "IntentDaemonError"
             }
             .into(),
+            value,
             stacktrace: Some(Stacktrace {
                 frames: vec![frame],
                 ..Default::default()
@@ -145,10 +154,22 @@ mod tests {
             tracing::warn!(target: "intent_fixture", "PRIVATE_WARN");
             tracing::error!(target: "external_library", "PRIVATE_DEPENDENCY_ERROR");
             tracing::error!(target: "intent_services::agent_terminal_failure", path = "/private/workspace/repo", "PRIVATE_AGENT_ERROR");
+            tracing::error!(
+                name: "oversized_outbound_uds_frame",
+                target: "intent_transport::listener",
+                frame_bytes = 45_785_573,
+                limit = 41_943_040,
+                "PRIVATE_DAEMON_ERROR"
+            );
         });
         let report = String::from_utf8(transport.0.lock().unwrap().clone()).unwrap();
         assert_eq!(report.matches("IntentAgentFailure").count(), 1);
+        assert_eq!(report.matches("IntentDaemonError").count(), 1);
+        assert!(report.contains(
+            r#""value":"Outbound Unix socket frame exceeded the size limit and was dropped""#
+        ));
         assert!(!report.contains("PRIVATE_"));
+        assert!(!report.contains("45785573"));
         assert!(!report.contains("/private/workspace"));
     }
 }
