@@ -209,9 +209,9 @@ pub(crate) fn build_git_status_value_with(
     let mut uncommitted = std::collections::HashSet::new();
     let mut staged = std::collections::HashSet::new();
     for f in &status.files {
-        uncommitted.insert(f.path.clone());
+        uncommitted.insert(f.path.as_str());
         if f.staged {
-            staged.insert(f.path.clone());
+            staged.insert(f.path.as_str());
         }
     }
 
@@ -238,6 +238,13 @@ pub(crate) fn build_git_status_value_with(
         "accept-changes.getStatus: status scan + remote/trunk resolve + history walk"
     );
 
+    // Both status reads and unsolicited changes:git-status events use
+    // this snapshot. Keep full counts above and cap the wire file list.
+    let wire_status = if status.files.len() > intent_git::status::MAX_STATUS_FILES {
+        std::borrow::Cow::Owned(intent_git::status::cap_status_files(&status))
+    } else {
+        std::borrow::Cow::Borrowed(status.as_ref())
+    };
     let mut value = json!({
         "branch": branch,
         "trunkBranch": trunk,
@@ -252,7 +259,7 @@ pub(crate) fn build_git_status_value_with(
         "remoteUrl": remote_url,
         "owner": owner,
         "repo": repo,
-        "gitStatus": status.as_ref(),
+        "gitStatus": wire_status.as_ref(),
     });
     if let Some(identity) = history_identity {
         value["historyIdentity"] = Value::String(identity);
@@ -1015,6 +1022,46 @@ mod tests {
         );
         assert_eq!(before["historyIdentity"], after["historyIdentity"]);
         assert_ne!(before["gitStatus"], after["gitStatus"]);
+    }
+
+    #[test]
+    fn workspace_status_event_caps_file_entries_without_changing_counts() {
+        use intent_core::{FileStatus, GitFileStatus};
+        use intent_git::status::{empty_status, MAX_STATUS_FILES};
+
+        let dir = init_repo("status-file-cap");
+        let ws = mk_workspace();
+        let mut scan = empty_status();
+        scan.has_uncommitted_changes = true;
+        scan.has_untracked_files = true;
+        scan.files
+            .extend((0..MAX_STATUS_FILES).map(|index| FileStatus {
+                path: format!("generated/file-{index}"),
+                status: GitFileStatus::Untracked,
+                staged: false,
+                mode: None,
+                old_sha: None,
+                new_sha: None,
+            }));
+        scan.files.push(FileStatus {
+            path: "tracked.txt".into(),
+            status: GitFileStatus::Modified,
+            staged: true,
+            mode: None,
+            old_sha: None,
+            new_sha: None,
+        });
+
+        let status = build_git_status_value_with(dir.path(), &ws, Some(scan.into())).unwrap();
+        let event = crate::changes_git_status_event(&ws.id, &status);
+        let status = &event.data["status"];
+        assert_eq!(status["uncommittedCount"], MAX_STATUS_FILES + 1);
+        assert_eq!(status["stagedCount"], 1);
+        let files = &status["gitStatus"];
+        assert_eq!(files["filesTruncated"], true);
+        assert_eq!(files["totalFiles"], MAX_STATUS_FILES + 1);
+        assert_eq!(files["files"].as_array().unwrap().len(), MAX_STATUS_FILES);
+        assert_eq!(files["files"][0]["path"], "tracked.txt");
     }
 
     #[test]
