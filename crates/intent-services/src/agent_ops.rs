@@ -1479,6 +1479,9 @@ pub(crate) fn resolve_delegate_provider_preview(
     crate::agent_session::derived_default_provider(&services.effective_settings())
 }
 
+pub(crate) const PROVIDER_DISABLED_ERROR_SUFFIX: &str =
+    "is not enabled — enable it in Settings > Providers, or choose an enabled provider or model.";
+
 /// Reject a known provider id that the user explicitly disabled in the
 /// `providers.enabled` settings map (`enabled[id] == false`, for providers
 /// with [`intent_providers::ProviderConfig::can_be_disabled`]) with a
@@ -1494,8 +1497,7 @@ pub(crate) fn ensure_provider_enabled(
     if provider_is_disabled(provider_id, enabled) {
         let display = intent_providers::provider_config(provider_id).display_name;
         return Err(Error::InvalidParams(format!(
-            "{method}: provider \"{provider_id}\" ({display}) is not enabled — enable it in \
-             Settings > Providers, or choose an enabled provider or model."
+            "{method}: provider \"{provider_id}\" ({display}) {PROVIDER_DISABLED_ERROR_SUFFIX}"
         )));
     }
     Ok(())
