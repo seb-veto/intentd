@@ -18064,7 +18064,15 @@ pub(crate) async fn persist_terminal_error_status_via_services(
     // monorepo#840: record the identical-failure streak BEFORE persisting so
     // `session_poisoned` sees a consistent (status, streak) pair as soon as
     // the Error status lands.
-    tracing::error!(target: "intent_services::agent_terminal_failure", "Agent turn failed");
+    // The stop reason can include provider output. Report a fixed classification
+    // for the locally generated provider-disabled rejection.
+    let provider_disabled = error_text.starts_with("invalid params: session/prompt: provider \"")
+        && error_text.ends_with(crate::agent_ops::PROVIDER_DISABLED_ERROR_SUFFIX);
+    tracing::error!(
+        target: "intent_services::agent_terminal_failure",
+        provider_disabled,
+        "Agent turn failed"
+    );
     let streak = services.record_terminal_failure(agent_id, error_text);
     // monorepo#940: the same classification that quarantines the session
     // (`session_poisoned`) is surfaced on the wire as `sessionCorrupted` so

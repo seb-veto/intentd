@@ -1,10 +1,11 @@
 //! Optional Sentry reporting for the serving daemon. Reports use compiler
-//! metadata only. Tracing fields and span contents can contain private data.
+//! metadata and fixed messages. Raw tracing fields can contain private data.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use sentry::protocol::{Event, Exception, Frame, Level, Stacktrace};
+use tracing::field::{Field, Visit};
 use tracing::{Event as TracingEvent, Metadata, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 
@@ -60,13 +61,38 @@ pub(crate) fn should_report(metadata: &Metadata<'_>) -> bool {
 
 impl<S: Subscriber> Layer<S> for Reporter {
     fn on_event(&self, event: &TracingEvent<'_>, _: Context<'_, S>) {
-        self.0.capture_event(report(event.metadata()), None);
+        self.0.capture_event(report(event), None);
     }
 }
 
-fn report(metadata: &Metadata<'_>) -> Event<'static> {
-    let module = metadata.target();
-    let agent_failure = module == "intent_services::agent_terminal_failure";
+#[derive(Default)]
+struct AgentFailureFields {
+    provider_disabled: bool,
+}
+
+impl Visit for AgentFailureFields {
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        if field.name() == "provider_disabled" {
+            self.provider_disabled = value;
+        }
+    }
+
+    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
+}
+
+fn report(event: &TracingEvent<'_>) -> Event<'static> {
+    let metadata = event.metadata();
+    let agent_failure = metadata.target() == "intent_services::agent_terminal_failure";
+    let value = agent_failure.then(|| {
+        let mut fields = AgentFailureFields::default();
+        event.record(&mut fields);
+        if fields.provider_disabled {
+            "Agent turn could not start because its provider is disabled. Enable the provider in Settings > Providers or choose an enabled provider or model."
+        } else {
+            "Agent turn failed"
+        }
+        .to_owned()
+    });
     // Keep relative Rust source locations within the checkout. Absolute
     // compiler paths can reveal the build machine's username and directories.
     let source = metadata.file().and_then(|path| {
@@ -74,7 +100,14 @@ fn report(metadata: &Metadata<'_>) -> Event<'static> {
         (relative.starts_with("crates/") && !relative.contains("..")).then_some(relative.to_owned())
     });
     let frame = Frame {
-        module: Some(module.to_owned()),
+        module: Some(
+            if agent_failure {
+                metadata.module_path().unwrap_or(metadata.target())
+            } else {
+                metadata.target()
+            }
+            .to_owned(),
+        ),
         filename: source,
         lineno: metadata.line().map(u64::from),
         in_app: Some(true),
@@ -103,6 +136,7 @@ fn report(metadata: &Metadata<'_>) -> Event<'static> {
                 "IntentDaemonError"
             }
             .into(),
+            value,
             stacktrace: Some(Stacktrace {
                 frames: vec![frame],
                 ..Default::default()
@@ -140,15 +174,28 @@ mod tests {
         use tracing_subscriber::Layer as _;
         let subscriber = tracing_subscriber::registry()
             .with(reporter.with_filter(tracing_subscriber::filter::filter_fn(should_report)));
-        tracing::subscriber::with_default(subscriber, || {
+        let report_line = tracing::subscriber::with_default(subscriber, || {
             let _span = tracing::error_span!("private", prompt = "PRIVATE_PROMPT").entered();
             tracing::warn!(target: "intent_fixture", "PRIVATE_WARN");
             tracing::error!(target: "external_library", "PRIVATE_DEPENDENCY_ERROR");
-            tracing::error!(target: "intent_services::agent_terminal_failure", path = "/private/workspace/repo", "PRIVATE_AGENT_ERROR");
+            let report_line = line!() + 1;
+            tracing::error!(target: "intent_services::agent_terminal_failure", provider_disabled = true, path = "/private/workspace/repo", "PRIVATE_AGENT_ERROR");
+            report_line
         });
         let report = String::from_utf8(transport.0.lock().unwrap().clone()).unwrap();
         assert_eq!(report.matches("IntentAgentFailure").count(), 1);
         assert!(!report.contains("PRIVATE_"));
         assert!(!report.contains("/private/workspace"));
+        let event: serde_json::Value =
+            serde_json::from_str(report.lines().nth(2).unwrap()).unwrap();
+        let exception = &event["exception"]["values"][0];
+        assert!(exception["value"]
+            .as_str()
+            .unwrap()
+            .contains("provider is disabled"));
+        let frame = &exception["stacktrace"]["frames"][0];
+        assert_eq!(frame["lineno"], report_line);
+        assert_eq!(frame["filename"], "crates/intentd/src/error_reporting.rs");
+        assert_eq!(frame["module"], module_path!());
     }
 }

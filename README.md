@@ -275,8 +275,8 @@ for the installed daemon's detailed options.
 
 Set `INTENT_ERROR_REPORTING_DSN` to a project's public HTTPS Sentry Client Key
 to enable error reporting on this daemon. Reports include first-party Rust
-error locations, terminal agent failure locations, and the build version.
-Error text, tracing fields, span contents, and agent details stay in the local
+error locations, fixed messages for terminal agent failures, and the build
+version. Raw error text, span contents, and agent details stay in the local
 logs. Configure the variable separately on each daemon. The variable is
 independent of the token Intent uses to read Sentry issues.
 
